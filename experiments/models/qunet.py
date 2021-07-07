@@ -8,11 +8,17 @@ from htorch.functions import QModReLU
 import torch
 import torch.nn as nn
 
-def set_ops(quaternion)
+from ..madgrad import MADGRAD
+from ..loss import FocalTverskyLoss
+from ..utils import f1_score
+from ..constants import *
+from ..crf import dense_crf_wrapper
+
+def set_ops(quaternion):
     global conv, act, factor
     conv = QConv2d if quaternion else nn.Conv2d
     act = QModReLU if quaternion else nn.ReLU
-    factor = 4 else 1
+    factor = 4 if quaternion else 1
 
 def double_conv(in_channels, out_channels):
     return nn.Sequential(
@@ -23,14 +29,14 @@ def double_conv(in_channels, out_channels):
     )   
 
 
-class UNet(nn.Module):
-
+class UNet(pl.LightningModule):
     def __init__(self, quaternion=True, n_class=10):
         super().__init__()
 
         set_ops(quaternion)
 
-        self.dconv_down1 = double_conv(3, 64 // factor)
+        self.dconv_down1 = double_conv(8 // factor, 64 // factor)
+
         self.dconv_down2 = double_conv(64 // factor, 128 // factor)
         self.dconv_down3 = double_conv(128 // factor, 256 // factor)
         self.dconv_down4 = double_conv(256 // factor, 512 // factor)        
@@ -84,7 +90,7 @@ class UNet(nn.Module):
 
     def training_step(self, train_batch, batch_idx):
         inputs, labels = train_batch
-        outputs = self.forward(inputs, labels) 
+        outputs = self.forward(inputs) 
 
         probs = torch.sigmoid(outputs).data.cpu().numpy()
         crf = np.stack(list(map(dense_crf_wrapper, zip(inputs.cpu().numpy(), probs))))
@@ -101,7 +107,8 @@ class UNet(nn.Module):
 
     def validation_step(self, val_batch, batch_idx):
         inputs, labels = val_batch
-        outputs = self.forward(inputs, labels)
+        outputs = self.forward(inputs)
+
 
         probs = torch.sigmoid(outputs).data.cpu().numpy()
         crf = np.stack(list(map(dense_crf_wrapper, zip(inputs.cpu().numpy(), probs))))
@@ -114,3 +121,4 @@ class UNet(nn.Module):
         self.log('val_loss', loss)
         self.log('val_f1_crf', f1_crf)
         self.log('val_f1', f1)
+
